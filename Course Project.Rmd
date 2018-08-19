@@ -1,0 +1,149 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "A.Gray"
+date: "August 19, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Process Libraries
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(gbm)
+```
+
+## Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+## Loading the data
+```{r}
+trainDat <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"),header=TRUE)
+
+testDat <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"),header=TRUE)
+
+dim(trainDat)
+dim(testDat)
+str(trainDat)
+```
+Our training data has 160 different columns with 19622 observations. 
+
+## Cleaning Data
+Several fields have mostly NULL or NA values, so we will remove them. Additionally, we will remove the first seven variables as they pertain to user information and won't impact the classe.
+
+```{r}
+trainDatClean <- trainDat[, colSums(is.na(trainDat)) == 0]
+testDatClean <- testDat[, colSums(is.na(testDat)) == 0]
+
+trainDatClean <- trainDatClean[, -c(1:7)]
+testDatClean <- testDatClean[, -c(1:7)]
+
+```
+
+Partition the training data into two:
+```{r}
+set.seed(1234)
+train <- createDataPartition(trainDatClean$classe, p = .7 , list = FALSE)
+trainDatTrain <- trainDatClean[train,]
+trainDatTest <- trainDatClean[-train,]
+
+```
+
+Remove Near - Zero Variance variables
+```{r}
+nzv <- nearZeroVar(trainDatTrain, saveMetrics=TRUE)
+trainDatTrain <- trainDatTrain[,nzv$nzv==FALSE]
+
+nzv <- nearZeroVar(trainDatTest, saveMetrics=TRUE)
+trainDatTest <- trainDatTest[,nzv$nzv==FALSE]
+
+```
+
+## Models
+We will used three methods below to predict outcomes: Classification trees, Random Forests, and
+Generalized Boosted Model
+
+# Classification Tree
+```{r}
+set.seed(1234)
+decTreeModel <- rpart(classe ~ ., data=trainDatTrain, method="class")
+fancyRpartPlot(decTreeModel)
+```
+Validate the model with the test data to see how it performs.
+```{r}
+predTreeModel <- predict(decTreeModel, trainDatTest, type = "class")
+conMatxTree <- confusionMatrix(predTreeModel, trainDatTest$classe)
+conMatxTree
+```
+ Plot Matrix Reuslts
+```{r}
+plot(conMatxTree$table, col = conMatxTree$byClass, 
+     main = paste("Decision Tree Accuracy =", round(conMatxTree$overall['Accuracy'], 4)))
+```
+We can see that the accuracy rate of the model is low, 0.6879 and the out-of-sample-error is about 0.3121.
+
+# Random Forest
+```{r}
+controlRandFor <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modRF1 <- train(classe ~ ., data=trainDatTrain, method="rf", trControl=controlRandFor)
+modRF1$finalModel
+```
+We then use the test data to validate the model looking at the Accuracy variable
+
+```{r}
+predictRF1 <- predict(modRF1, newdata=trainDatTest)
+cmrf <- confusionMatrix(predictRF1, trainDatTest$classe)
+cmrf
+```
+The accuracy of the random forest is very high, .9939 and the out-of-sample-error is .0061. This could be due to the accuracy of the model, but also to over fitting of the data.
+
+```{r}
+plot(modRF1)
+plot(cmrf$table, col = cmrf$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", round(cmrf$overall['Accuracy'], 4)))
+```
+
+# Prediction with Generalized Boosted Regression Models
+```{r}
+set.seed(1234)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modGBM  <- train(classe ~ ., data=trainDatTrain, method = "gbm", trControl = controlGBM, verbose = FALSE)
+modGBM$finalModel
+```
+```{r}
+print(modGBM)
+```
+Validate GBM
+```{r}
+predictGBM <- predict(modGBM, newdata=trainDatTest)
+cmGBM <- confusionMatrix(predictGBM, trainDatTest$classe)
+cmGBM
+```
+The accuracy rate using the random forest is very high, 0.9631 and the out-of-sample-error is equal to 0.0369.
+
+# Applying Best Model to Validation Data
+Looking at the accuracies of the three models, it is clear the the ‘Random Forest’ model is the best fit. So will use it on the validation data
+
+```{r}
+Results <- predict(modRF1, newdata=testDatClean)
+Results
+```
